@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Texas Hold'em Poker</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;touch-action:manipulation}
+body{background:#1a4a2e;font-family:Georgia,serif;color:#fff;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:12px;-webkit-text-size-adjust:100%}
+button{font-family:Georgia,serif;cursor:pointer}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:center}
+.chip{border-radius:12px;padding:2px 8px;font-size:12px;font-weight:bold;color:#fff;display:inline-block}
+.card{border-radius:6px;background:#fff;border:2px solid #cbd5e0;display:flex;flex-direction:column;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.card-back{border-radius:6px;background:linear-gradient(135deg,#4a5568,#2d3748);border:2px solid #718096;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+#ai-players{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-bottom:10px;width:100%;max-width:620px}
+.ai-box{border-radius:8px;padding:6px 10px;min-width:100px;text-align:center;position:relative;border:2px solid #48bb78;background:#2d6a4f}
+.ai-box.folded{opacity:.4;background:#2d3748;border-color:#4a5568}
+.ai-box.allin{background:#1a3a5c;border-color:#63b3ed}
+.ai-box.active{background:#276749;border-color:#68d391}
+.ai-box.winner{background:#744210;border-color:#f6ad55}
+.thinking-badge{position:absolute;top:-10px;left:50%;transform:translateX(-50%);background:#68d391;color:#1a202c;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:bold;white-space:nowrap}
+#community{background:#145a32;border-radius:12px;padding:10px 16px;margin-bottom:10px;text-align:center;min-width:280px}
+#human-box{border-radius:10px;padding:10px 16px;margin-bottom:10px;text-align:center;min-width:280px;max-width:340px;border:2px solid #4299e1;background:#1e3a5f}
+#human-box.winner{background:#744210;border-color:#f6ad55}
+#human-box.myturn{border-color:#63b3ed}
+#human-box.allin{background:#1a3a5c;border-color:#63b3ed}
+#message{background:rgba(0,0,0,.3);border-radius:8px;padding:6px 16px;margin-bottom:10px;font-size:13px;text-align:center;max-width:360px}
+#controls{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+#log-box{margin-top:10px;background:rgba(0,0,0,.3);border-radius:8px;padding:8px 12px;width:100%;max-width:340px}
+.log-title{font-size:11px;color:#718096;margin-bottom:4px}
+.log-entry{font-size:12px;color:#718096}
+.log-entry.latest{color:#e2e8f0}
+</style>
+</head>
+<body>
+<h2>♠ Texas Hold'em ♣</h2>
+<div class="row" id="top-row" style="margin-bottom:8px"></div>
+<div id="ai-players"></div>
+<div id="community">
+  <div style="font-size:11px;color:#a0aec0;margin-bottom:6px">Community Cards</div>
+  <div class="row" id="community-cards" style="min-height:72px"><span style="color:#a0aec0;font-size:13px;align-self:center">Waiting for deal...</span></div>
+</div>
+<div id="human-box">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+    <span style="font-weight:bold;font-size:14px" id="human-label">You</span>
+    <span class="chip" id="human-chips" style="background:#2b6cb0">$1000</span>
+  </div>
+  <div class="row" id="human-cards" style="justify-content:center;margin-bottom:4px"></div>
+  <div id="human-best" style="font-size:12px;color:#90cdf4;min-height:16px"></div>
+  <div id="human-bet-row" style="font-size:12px;margin-top:2px"></div>
+</div>
+<div id="message">Welcome to Texas Hold'em! Press Deal to start.</div>
+<div id="controls"></div>
+<div id="log-box" style="display:none">
+  <div class="log-title">Action Log</div>
+  <div id="log-entries"></div>
+</div>
+<script>
+var SUITS=["♠","♥","♦","♣"],RANKS=["2","3","4","5","6","7","8","9","10","J","Q","K","A"];
+var RV={};RANKS.forEach(function(r,i){RV[r]=i+2;});
+var SC=1000,SB=10,BB=20;
+
+// ---- Audio ----
+var audioCtx=null;
+function getAudioCtx(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();return audioCtx;}
+function playTone(freq,type,duration,gain,delay){
+  try{
+    var ctx=getAudioCtx();
+    ctx.resume().then(function(){
+      var now=ctx.currentTime,osc=ctx.createOscillator(),g=ctx.createGain();
+      osc.connect(g);g.connect(ctx.destination);
+      osc.type=type||"sine";
+      var t=now+(delay||0);
+      osc.frequency.setValueAtTime(freq,t);
+      g.gain.setValueAtTime(gain||0.3,t);
+      g.gain.exponentialRampToValueAtTime(0.001,t+duration);
+      osc.start(t);osc.stop(t+duration);
+    });
+  }catch(e){}
+}
+function soundDeal(){playTone(1200,"square",0.04,0.15);playTone(1000,"square",0.04,0.12,0.06);}
+function soundCheck(){playTone(440,"sine",0.12,0.18);}
+function soundCall(){playTone(520,"sine",0.1,0.2);playTone(420,"sine",0.12,0.18,0.1);}
+function soundRaise(){playTone(600,"sawtooth",0.1,0.2);playTone(800,"sawtooth",0.1,0.2,0.1);playTone(1000,"sawtooth",0.1,0.18,0.2);}
+function soundFold(){playTone(320,"sine",0.15,0.2);playTone(220,"sine",0.2,0.18,0.15);}
+function soundAllIn(){for(var i=0;i<5;i++)playTone(300+i*120,"sawtooth",0.12,0.25,i*0.07);}
+function soundWin(){var n=[523,659,784,1047];for(var i=0;i<n.length;i++)playTone(n[i],"sine",0.25,0.3,i*0.12);}
+function soundNewPhase(){playTone(330,"sine",0.15,0.2);playTone(440,"sine",0.15,0.2,0.12);}
+function soundShowdown(){var n=[440,554,659,880];for(var i=0;i<n.length;i++)playTone(n[i],"triangle",0.18,0.25,i*0.09);}
+
+// ---- Cards ----
+function makeDeck(){var d=[];for(var i=0;i<SUITS.length;i++)for(var j=0;j<RANKS.length;j++)d.push({s:SUITS[i],r:RANKS[j]});return d;}
+function shuffle(d){var a=d.slice();for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function combos(arr,k){if(k===0)return[[]];if(arr.length<k)return[];var h=arr[0],t=arr.slice(1),r=[],wH=combos(t,k-1),woH=combos(t,k);for(var i=0;i<wH.length;i++)r.push([h].concat(wH[i]));for(var i=0;i<woH.length;i++)r.push(woH[i]);return r;}
+
+function handRank(cards){
+  if(!cards||cards.length<5)return null;
+  var cs=cards.slice().sort(function(a,b){return RV[b.r]-RV[a.r];});
+  var vals=cs.map(function(c){return RV[c.r];}),suits=cs.map(function(c){return c.s;});
+  var rc={};for(var i=0;i<vals.length;i++)rc[vals[i]]=(rc[vals[i]]||0)+1;
+  var counts=Object.values(rc).sort(function(a,b){return b-a;});
+  var flush=suits.every(function(s){return s===suits[0];});
+  var uniq=[];vals.forEach(function(v){if(uniq.indexOf(v)<0)uniq.push(v);});
+  var straight=false,straightVals=vals.slice();
+  if(uniq.length===5&&vals[0]-vals[4]===4)straight=true;
+  else if(vals[0]===14&&vals[1]===5&&vals[2]===4&&vals[3]===3&&vals[4]===2){straight=true;straightVals=[5,4,3,2,1];}
+  var groups={};
+  for(var v in rc){var c=rc[v];if(!groups[c])groups[c]=[];groups[c].push(parseInt(v));}
+  for(var c in groups)groups[c].sort(function(a,b){return b-a;});
+  var canonVals=[],co=[4,3,2,1];
+  for(var ci=0;ci<co.length;ci++){var cnt=co[ci];if(groups[cnt])for(var gi=0;gi<groups[cnt].length;gi++)for(var rep=0;rep<cnt;rep++)canonVals.push(groups[cnt][gi]);}
+  if(flush&&straight)return{rank:8,name:"Straight Flush",vals:straightVals};
+  if(counts[0]===4)return{rank:7,name:"Four of a Kind",vals:canonVals};
+  if(counts[0]===3&&counts[1]===2)return{rank:6,name:"Full House",vals:canonVals};
+  if(flush)return{rank:5,name:"Flush",vals:vals};
+  if(straight)return{rank:4,name:"Straight",vals:straightVals};
+  if(counts[0]===3)return{rank:3,name:"Three of a Kind",vals:canonVals};
+  if(counts[0]===2&&counts[1]===2)return{rank:2,name:"Two Pair",vals:canonVals};
+  if(counts[0]===2)return{rank:1,name:"One Pair",vals:canonVals};
+  return{rank:0,name:"High Card",vals:vals};
+}
+
+function bestHand(hole,comm){
+  var all=hole.concat(comm);
+  if(all.length<5)return null;
+  var best=null,cs=combos(all,5);
+  for(var i=0;i<cs.length;i++){
+    var h=handRank(cs[i]);
+    if(!h)continue;
+    if(!best){best=h;continue;}
+    if(h.rank>best.rank){best=h;continue;}
+    if(h.rank===best.rank){for(var j=0;j<h.vals.length;j++){var hv=h.vals[j]||0,bv=best.vals[j]||0;if(hv>bv){best=h;break;}if(hv<bv)break;}}
+  }
+  return best;
+}
+
+function cmpHand(a,b){
+  if(!a)return 1;if(!b)return -1;
+  if(b.rank!==a.rank)return b.rank-a.rank;
+  for(var i=0;i<Math.max(a.vals.length,b.vals.length);i++)if((b.vals[i]||0)!==(a.vals[i]||0))return(b.vals[i]||0)-(a.vals[i]||0);
+  return 0;
+}
+
+function estimateWinProb(holeCards,community,numOpponents,iterations){
+  iterations=iterations||1000;
+  var known={};holeCards.concat(community).forEach(function(c){known[c.s+c.r]=true;});
+  var deck=makeDeck().filter(function(c){return!known[c.s+c.r];});
+  var wins=0,soleWins=0;
+  for(var i=0;i<iterations;i++){
+    var d=shuffle(deck),di=0,board=community.slice();
+    while(board.length<5)board.push(d[di++]);
+    var myBest=bestHand(holeCards,board);
+    if(!myBest)continue;
+    var oppHands=[];
+    for(var o=0;o<numOpponents;o++)oppHands.push(bestHand([d[di++],d[di++]],board));
+    var beat=false,tied=false;
+    for(var o=0;o<oppHands.length;o++){var c=cmpHand(myBest,oppHands[o]);if(c>0){beat=true;break;}if(c===0)tied=true;}
+    if(!beat){wins++;if(!tied)soleWins++;}
+  }
+  return{winRate:wins/iterations,soleWinRate:soleWins/iterations};
+}
+
+function preflopStrength(hole){
+  var vals=hole.map(function(c){return RV[c.r];}).sort(function(a,b){return b-a;});
+  var a=vals[0],b=vals[1],suited=hole[0].s===hole[1].s,paired=a===b;
+  var score=paired?Math.max(5,a):a/2;
+  if(suited)score+=2;
+  var gap=a-b;
+  if(gap===1)score+=1;else if(gap===3)score-=1;else if(gap===4)score-=2;else if(gap>4)score-=4;
+  if(a>=11&&b>=11)score+=1;
+  return Math.min(Math.max(score/20,0),1);
+}
+
+function cardEl(card,hidden,small){
+  var w=small?"36px":"52px",h=small?"52px":"72px";
+  var el=document.createElement("div");
+  if(hidden||!card){
+    el.className="card-back";el.style.cssText="width:"+w+";height:"+h;
+    el.innerHTML='<span style="font-size:'+(small?"40px":"55px")+'">🂠</span>';
+  } else {
+    el.className="card";el.style.cssText="width:"+w+";height:"+h;
+    var red=card.s==="♥"||card.s==="♦",col=red?"#e53e3e":"#1a202c";
+    el.innerHTML='<span style="font-size:'+(small?"22px":"30px")+';font-weight:normal;color:'+col+';line-height:0.9">'+card.r+'</span>'
+      +'<span style="font-size:'+(small?"13px":"17px")+';color:'+col+'">'+card.s+'</span>';
+  }
+  return el;
+}
+function chipEl(amount,color){var el=document.createElement("span");el.className="chip";el.style.background=color||"#4a5568";el.textContent="$"+amount;return el;}
+
+// ---- Game State ----
+var G={},aiTimer=null,nextHandTimer=null;
+
+function init(){
+  if(nextHandTimer){clearInterval(nextHandTimer);nextHandTimer=null;}
+  if(aiTimer){clearTimeout(aiTimer);aiTimer=null;}
+  G={
+    players:[
+      {id:0,name:"You",chips:SC,human:true,style:null},
+      {id:1,name:"Ace Annie",chips:SC,human:false,style:"aggressive"},
+      {id:2,name:"Bluff Billy",chips:SC,human:false,style:"bluffer"},
+      {id:3,name:"Cool Carlos",chips:SC,human:false,style:"cautious"},
+      {id:4,name:"Danger Dan",chips:SC,human:false,style:"balanced"},
+      {id:5,name:"Easy Eddie",chips:SC,human:false,style:"loose"}
+    ],
+    deck:[],hands:{},community:[],pot:0,bets:{},roundBet:0,
+    folded:new Set(),allin:new Set(),acted:new Set(),
+    raiseCount:0,raiseThresholdBonus:0,foldThresholdBonus:0,decremented:false,lastRaiserId:null,
+    phase:"idle",activeId:null,
+    dealerIdx:Math.floor(Math.random()*6),
+    winners:[],log:[]
+  };
+  render();
+}
+
+function addLog(msg){G.log=[msg].concat(G.log).slice(0,10);}
+function setMsg(m){document.getElementById("message").textContent=m;}
+function inHand(){return G.players.filter(function(p){return!G.folded.has(p.id);});}
+function canAct(){return G.players.filter(function(p){return!G.folded.has(p.id)&&!G.allin.has(p.id)&&p.chips>0;});}
+
+function startHand(){
+  if(nextHandTimer){clearInterval(nextHandTimer);nextHandTimer=null;}
+  var alive=G.players.filter(function(p){return p.chips>0;});
+  if(alive.length<2){setMsg("Not enough players!");return;}
+  getAudioCtx();
+  G.hands={};G.community=[];G.winners=[];G.log=["--- New Hand ---"];
+  G.allin=new Set();G.raiseCount=0;G.raiseThresholdBonus=0;G.foldThresholdBonus=0;G.decremented=false;G.lastRaiserId=null;
+  setTimeout(soundDeal,50);
+  var di=shuffle(makeDeck());
+  alive.forEach(function(p){G.hands[p.id]=[di.shift(),di.shift()];});
+  G.deck=di;
+  G.folded=new Set(G.players.filter(function(p){return p.chips===0;}).map(function(p){return p.id;}));
+  var sbPos=(G.dealerIdx+1)%alive.length,bbPos=(G.dealerIdx+2)%alive.length;
+  var sbId=alive[sbPos].id,bbId=alive[bbPos].id;
+  G.bets={};alive.forEach(function(p){G.bets[p.id]=0;});
+  var sbAmt=Math.min(SB,alive.find(function(p){return p.id===sbId;}).chips);
+  var bbAmt=Math.min(BB,alive.find(function(p){return p.id===bbId;}).chips);
+  G.bets[sbId]=sbAmt;G.bets[bbId]=bbAmt;
+  G.players=G.players.map(function(p){
+    if(p.id===sbId)return Object.assign({},p,{chips:p.chips-sbAmt});
+    if(p.id===bbId)return Object.assign({},p,{chips:p.chips-bbAmt});
+    return p;
+  });
+  G.players.forEach(function(p){if(p.chips===0&&!G.folded.has(p.id)){G.allin.add(p.id);setTimeout(soundAllIn,100);}});
+  G.pot=sbAmt+bbAmt;G.roundBet=BB;
+  var initActed=new Set([sbId]);
+  if(G.allin.has(bbId))initActed.add(bbId);
+  G.acted=initActed;G.phase="preflop";
+  var firstPos=(G.dealerIdx+3)%alive.length;
+  G.activeId=alive[firstPos].id;
+  setMsg("Blinds posted.");render();
+  if(G.activeId!==0)scheduleAI(G.activeId);
+  else if(G.activeId===null)advancePhase();
+}
+
+function scheduleAI(id){if(aiTimer)clearTimeout(aiTimer);aiTimer=setTimeout(function(){runAI(id);},700);}
+
+function runAI(id){
+  if(G.phase==="idle"||G.phase==="showdown")return;
+  if(G.activeId!==id||G.folded.has(id)||G.allin.has(id))return;
+  var p=G.players.find(function(x){return x.id===id;});
+  if(!p||p.chips===0)return;
+  var myBet=G.bets[id]||0,toCall=G.roundBet-myBet,style=p.style;
+  var hole=G.hands[id]||[],comm=G.community;
+  var opponents=inHand().filter(function(x){return x.id!==id;}).length;
+  var r=Math.random();
+  var strength=0,soleWinRate=0;
+  if(comm.length===0){
+    strength=preflopStrength(hole);soleWinRate=0;
+  } else {
+    var result=estimateWinProb(hole,comm,opponents,1000);
+    strength=result.winRate;soleWinRate=result.soleWinRate;
+  }
+  var T={
+    aggressive:{ft:0.14,rs:0.44},
+    bluffer:   {ft:0.12,rs:0.42},
+    cautious:  {ft:0.20,rs:0.50},
+    balanced:  {ft:0.18,rs:0.48},
+    loose:     {ft:0.16,rs:0.46}
+  }[style]||{ft:0.18,rs:0.48};
+  var adjustedRs=T.rs+G.raiseThresholdBonus;
+  var adjustedFt=T.ft+G.foldThresholdBonus;
+  var effectiveStrength=strength;
+  var shouldFold=toCall>0&&effectiveStrength<adjustedFt;
+  // During Flop/Turn/River, if responding to a raise, fold if our best hand is weaker than the raiser's
+  if(!shouldFold&&toCall>0&&G.phase!=="preflop"&&G.lastRaiserId!==null&&comm.length>0){
+    var myBestH=bestHand(hole,comm);
+    var raiserHole=G.hands[G.lastRaiserId];
+    var raiserBestH=raiserHole?bestHand(raiserHole,comm):null;
+    if(myBestH&&raiserBestH&&cmpHand(myBestH,raiserBestH)>0)shouldFold=true;
+  }
+  var isSoleWinner=soleWinRate>=1.0;
+  // Limit 1: if all opponents still in hand are all-in, no point raising
+  var allOppsAllin=inHand().filter(function(x){return x.id!==id;}).every(function(x){return G.allin.has(x.id);});
+  // Limit 2: if best hand is just the five community cards (hole cards don't contribute)
+  var bestWithHole=comm.length>0?bestHand(hole,comm):null;
+  var bestBoardOnly=comm.length>=5?bestHand([],comm):null;
+  var usingBoardOnly=bestWithHole&&bestBoardOnly&&bestWithHole.rank===bestBoardOnly.rank&&JSON.stringify(bestWithHole.vals)===JSON.stringify(bestBoardOnly.vals);
+  var shouldRaise=!allOppsAllin&&!usingBoardOnly&&adjustedRs<=1.0&&p.chips>BB&&(isSoleWinner||effectiveStrength>adjustedRs);
+  var action;
+  if(shouldFold)action="fold";
+  else if(shouldRaise)action="raise";
+  else action="call";
+  if(toCall===0&&action==="call")action="check";
+  applyAction(id,action);
+}
+
+function applyAction(id,action){
+  var p=G.players.find(function(x){return x.id===id;});
+  var myBet=G.bets[id]||0,toCall=G.roundBet-myBet;
+  if(action==="fold"){
+    G.folded.add(id);addLog(p.name+" folded");soundFold();
+  } else if(action==="check"){
+    addLog(p.name+" checked");soundCheck();
+  } else if(action==="call"){
+    var paid=Math.min(toCall,p.chips);
+    G.bets[id]=myBet+paid;G.pot+=paid;
+    G.players=G.players.map(function(x){return x.id===id?Object.assign({},x,{chips:x.chips-paid}):x;});
+    var updP=G.players.find(function(x){return x.id===id;});
+    if(updP.chips===0){
+      G.allin.add(id);
+      if(G.bets[id]>G.roundBet){var prev=G.roundBet;G.roundBet=G.bets[id];if(G.bets[id]-prev>=BB)G.acted=new Set([id]);}
+      addLog(p.name+" all-in $"+G.bets[id]);soundAllIn();
+    } else {
+      addLog(p.name+" called $"+paid);soundCall();
+    }
+  } else if(action==="raise"){
+    var target=Math.min(G.roundBet+BB,p.chips+myBet),add=target-myBet;
+    if(add<=0){
+      addLog(p.name+" checked");soundCheck();
+    } else {
+      G.bets[id]=target;G.pot+=add;G.roundBet=target;
+      G.players=G.players.map(function(x){return x.id===id?Object.assign({},x,{chips:x.chips-add}):x;});
+      G.acted=new Set([id]);
+      G.raiseCount=G.raiseCount<=0?1:G.raiseCount+1;
+      G.raiseThresholdBonus=G.raiseCount*0.05;
+      G.foldThresholdBonus=G.raiseCount*0.05;
+      G.lastRaiserId=id;
+      var updP2=G.players.find(function(x){return x.id===id;});
+      if(updP2.chips===0){G.allin.add(id);soundAllIn();}
+      addLog(p.name+" raised to $"+target+(updP2.chips===0?" (all-in)":""));soundRaise();
+    }
+  }
+  G.acted.add(id);
+  var notFolded=inHand();
+  if(notFolded.length===1){
+    var w=notFolded[0];
+    addLog(w.name+" won $"+G.pot+" (all folded)");
+    G.players=G.players.map(function(x){return x.id===w.id?Object.assign({},x,{chips:x.chips+G.pot}):x;});
+    G.winners=[w.id];G.phase="showdown";G.activeId=null;
+    setMsg(w.id===0?"You won $"+G.pot+"!":w.name+" won $"+G.pot+"!");soundWin();
+    G.dealerIdx=(G.dealerIdx+1)%Math.max(1,G.players.filter(function(x){return x.chips>0;}).length);
+    render();return;
+  }
+  var actors=canAct();
+  var allActed=actors.length===0||actors.every(function(a){return G.acted.has(a.id);});
+  var betsEven=actors.every(function(a){return(G.bets[a.id]||0)===G.roundBet;});
+  if(allActed&&betsEven){render();advancePhase();return;}
+  var allIds=G.players.map(function(p){return p.id;}),curPos=allIds.indexOf(id),nextId=null;
+  for(var i=1;i<=allIds.length;i++){
+    var nid=allIds[(curPos+i)%allIds.length],found=false;
+    for(var j=0;j<actors.length;j++){if(actors[j].id===nid){found=true;break;}}
+    if(found){nextId=nid;break;}
+  }
+  // If in flop/turn/river, nobody has raised yet, and exactly one player hasn't acted, decrement once per phase
+  if(G.raiseCount<=0&&!G.decremented){
+    var unacted=actors.filter(function(a){return!G.acted.has(a.id);});
+    if(unacted.length===1){
+      G.raiseCount--;
+      G.raiseThresholdBonus=G.raiseCount*0.05;
+      G.foldThresholdBonus=G.raiseCount*0.05;
+      G.decremented=true;
+    }
+  }
+  if(nextId===null){render();advancePhase();return;}
+  G.activeId=nextId;render();
+  if(nextId!==0)scheduleAI(nextId);
+  else{var tc=G.roundBet-(G.bets[0]||0);setMsg(tc>0?"Your turn — To call: $"+tc:"Your turn — Check or Raise?");}
+}
+
+function advancePhase(){
+  var newBets={};G.players.forEach(function(p){newBets[p.id]=0;});
+  G.bets=newBets;G.roundBet=0;G.acted=new Set();G.decremented=false;G.lastRaiserId=null;
+  if(G.phase==="preflop"){G.community=[G.deck.shift(),G.deck.shift(),G.deck.shift()];G.phase="flop";addLog("--- Flop ---");soundNewPhase();}
+  else if(G.phase==="flop"){G.community.push(G.deck.shift());G.phase="turn";addLog("--- Turn ---");soundNewPhase();}
+  else if(G.phase==="turn"){G.community.push(G.deck.shift());G.phase="river";addLog("--- River ---");soundNewPhase();}
+  else{doShowdown();return;}
+  if(canAct().length===0){render();setTimeout(advancePhase,600);return;}
+  var actors=canAct(),allIds=G.players.map(function(p){return p.id;}),firstId=actors[0].id;
+  for(var i=1;i<=allIds.length;i++){
+    var pp=G.players[(G.dealerIdx+i)%allIds.length];
+    if(pp){var found=false;for(var j=0;j<actors.length;j++){if(actors[j].id===pp.id){found=true;break;}}if(found){firstId=pp.id;break;}}
+  }
+  G.activeId=firstId;render();
+  if(firstId!==0)scheduleAI(firstId);
+  else setMsg("Your turn — Check or Raise?");
+}
+
+function doShowdown(){
+  G.phase="showdown";G.activeId=null;soundShowdown();
+  var competing=inHand();
+  var results=competing.map(function(p){return Object.assign({},p,{best:bestHand(G.hands[p.id]||[],G.community)});});
+  var bestRank=-1;
+  for(var i=0;i<results.length;i++){if(results[i].best&&results[i].best.rank>bestRank)bestRank=results[i].best.rank;}
+  var candidates=results.filter(function(r){return r.best&&r.best.rank===bestRank;});
+  candidates.sort(function(a,b){var av=a.best.vals,bv=b.best.vals;for(var i=0;i<Math.max(av.length,bv.length);i++){if((bv[i]||0)!==(av[i]||0))return(bv[i]||0)-(av[i]||0);}return 0;});
+  var topVals=candidates[0].best.vals;
+  var ws=candidates.filter(function(r){var v=r.best.vals;for(var i=0;i<Math.max(v.length,topVals.length);i++){if((v[i]||0)!==(topVals[i]||0))return false;}return true;});
+  var share=Math.floor(G.pot/ws.length),remainder=G.pot-share*ws.length;
+  var allIds=G.players.map(function(p){return p.id;});
+  var sortedW=ws.slice().sort(function(a,b){
+    var ai=(allIds.indexOf(a.id)-G.dealerIdx-1+allIds.length)%allIds.length;
+    var bi=(allIds.indexOf(b.id)-G.dealerIdx-1+allIds.length)%allIds.length;
+    return ai-bi;
+  });
+  G.winners=ws.map(function(w){return w.id;});
+  G.players=G.players.map(function(p){
+    var wi=-1;for(var i=0;i<sortedW.length;i++){if(sortedW[i].id===p.id){wi=i;break;}}
+    if(wi===-1)return p;
+    return Object.assign({},p,{chips:p.chips+share+(wi<remainder?1:0)});
+  });
+  var names=ws.map(function(w){return w.id===0?"You":w.name;}).join(" & ");
+  var hn=ws[0]&&ws[0].best?ws[0].best.name:"High Card";
+  addLog(names+" won $"+G.pot+" ("+hn+")");
+  var left=G.players.filter(function(p){return p.chips>0;});
+  var winnerName=ws[0]?(ws[0].id===0?"You":ws[0].name):"Someone";
+  var gameOverMsg=ws[0]&&ws[0].id===0?"You won the game! 🏆":winnerName+" won the game! 🏆";
+  if(left.length<=1){setMsg(gameOverMsg);soundWin();setTimeout(soundWin,500);}
+  else{var handMsg=ws.length===1&&ws[0].id===0?"You won $"+G.pot+" with "+hn+"!":names+" won $"+G.pot+" with "+hn+"!";setMsg(handMsg);soundWin();}
+  G.dealerIdx=(G.dealerIdx+1)%Math.max(1,G.players.filter(function(p){return p.chips>0||G.winners.indexOf(p.id)>=0;}).length);
+  render();
+}
+
+function humanAction(action){
+  if(G.activeId!==0||G.phase==="idle"||G.phase==="showdown")return;
+  applyAction(0,action);
+}
+
+function render(){
+  var players=G.players,hands=G.hands,community=G.community,pot=G.pot,bets=G.bets;
+  var folded=G.folded,allin=G.allin,phase=G.phase,activeId=G.activeId,winners=G.winners,log=G.log,roundBet=G.roundBet;
+  var phaseLabel={idle:"",preflop:"Pre-Flop",flop:"Flop",turn:"Turn",river:"River",showdown:"Showdown"}[phase]||"";
+  var isMyTurn=activeId===0&&phase!=="idle"&&phase!=="showdown"&&!folded.has(0)&&!allin.has(0);
+  var tr=document.getElementById("top-row");tr.innerHTML="";
+  if(phaseLabel){var sl=document.createElement("span");sl.style.cssText="background:#2d6a4f;padding:3px 12px;border-radius:12px;font-size:13px";sl.textContent=phaseLabel;tr.appendChild(sl);}
+  var pl=document.createElement("span");pl.style.cssText="font-weight:bold;font-size:15px";pl.textContent="Pot: ";pl.appendChild(chipEl(pot,"#d69e2e"));tr.appendChild(pl);
+  var aip=document.getElementById("ai-players");aip.innerHTML="";
+  players.filter(function(p){return!p.human;}).forEach(function(p){
+    var isFolded=folded.has(p.id),isAllin=allin.has(p.id),isActive=activeId===p.id&&phase!=="idle"&&phase!=="showdown",isWinner=winners.indexOf(p.id)>=0;
+    var box=document.createElement("div");
+    box.className="ai-box"+(isFolded?" folded":isWinner?" winner":isActive?" active":isAllin?" allin":"");
+    if(isActive){var tb=document.createElement("div");tb.className="thinking-badge";tb.textContent="THINKING";box.appendChild(tb);}
+    box.innerHTML+='<div style="font-size:12px;font-weight:bold">'+p.name+'</div><div style="font-size:10px;color:#a0aec0">'+p.style+'</div>';
+    box.appendChild(chipEl(p.chips,p.chips<100?"#c53030":"#2b6cb0"));
+    var cr=document.createElement("div");cr.className="row";cr.style.cssText="justify-content:center;margin-top:4px;gap:3px";
+    if(phase==="showdown"&&hands[p.id]){
+      hands[p.id].forEach(function(c){cr.appendChild(cardEl(c,isFolded,true));});
+      if(!isFolded){var bh=bestHand(hands[p.id],G.community);if(bh){var hl=document.createElement("div");hl.style.cssText="font-size:10px;margin-top:2px;color:"+(isWinner?"#f6ad55":"#90cdf4");hl.textContent=bh.name;box.appendChild(hl);}}
+    } else if(hands[p.id]){cr.appendChild(cardEl(null,true,true));cr.appendChild(cardEl(null,true,true));}
+    box.appendChild(cr);
+    if(isFolded){var fd=document.createElement("div");fd.style.cssText="font-size:10px;color:#fc8181";fd.textContent="FOLDED";box.appendChild(fd);}
+    else if(isAllin){var ad=document.createElement("div");ad.style.cssText="font-size:10px;color:#63b3ed";ad.textContent="ALL-IN";box.appendChild(ad);}
+    if(!isFolded&&(bets[p.id]||0)>0){var br=document.createElement("div");br.style.cssText="font-size:11px;margin-top:2px";br.textContent="Bet: ";br.appendChild(chipEl(bets[p.id],"#6b46c1"));box.appendChild(br);}
+    aip.appendChild(box);
+  });
+  var cc=document.getElementById("community-cards");cc.innerHTML="";
+  if(community.length===0){var cs=document.createElement("span");cs.style.cssText="color:#a0aec0;font-size:13px;align-self:center";cs.textContent="Waiting for deal...";cc.appendChild(cs);}
+  else community.forEach(function(c){cc.appendChild(cardEl(c,false,false));});
+  var hbox=document.getElementById("human-box"),isHumanAllin=allin.has(0);
+  hbox.className=winners.indexOf(0)>=0?"winner":isMyTurn?"myturn":isHumanAllin?"allin":"";
+  var human=players.find(function(p){return p.id===0;});
+  document.getElementById("human-label").textContent="You"+(isMyTurn?" 🔵":isHumanAllin?" (All-In)":"");
+  var hc=document.getElementById("human-chips");hc.textContent="$"+(human?human.chips:0);hc.style.background="#2b6cb0";
+  var hcards=document.getElementById("human-cards");hcards.innerHTML="";
+  if(hands[0]&&hands[0].length===2){
+    var hideHuman=phase==="showdown"&&folded.has(0);
+    hands[0].forEach(function(c){hcards.appendChild(cardEl(c,hideHuman,false));});
+  } else {hcards.appendChild(cardEl(null,true,false));hcards.appendChild(cardEl(null,true,false));}
+  var hbest=document.getElementById("human-best");
+  if(hands[0]&&community.length>0&&!folded.has(0)){var bh2=bestHand(hands[0],community);hbest.textContent=bh2?"Best: "+bh2.name:"";}
+  else hbest.textContent=folded.has(0)?"FOLDED":"";
+  hbest.style.color=folded.has(0)?"#fc8181":"#90cdf4";
+  var hbr=document.getElementById("human-bet-row");hbr.innerHTML="";
+  if(!folded.has(0)&&(bets[0]||0)>0){hbr.textContent="Bet: ";hbr.appendChild(chipEl(bets[0],"#6b46c1"));}
+  var ctrl=document.getElementById("controls");ctrl.innerHTML="";
+  var toCall=Math.max(0,roundBet-(bets[0]||0));
+  if(phase==="idle"||phase==="showdown"){
+    var withChips=players.filter(function(p){return p.chips>0;});
+    var gameOver=withChips.length<=1;
+    var nextAction=gameOver?init:startHand,nextLabel=gameOver?"New Game":"Next Hand";
+    var btn=document.createElement("button");
+    btn.style.cssText="background:#276749;border:2px solid #48bb78;color:#fff;padding:10px 32px;border-radius:8px;font-size:15px;font-weight:bold";
+    if(phase==="showdown"&&!gameOver){
+      if(nextHandTimer)clearInterval(nextHandTimer);
+      var secs=10;
+      btn.textContent=nextLabel+" ("+secs+"s)";
+      nextHandTimer=setInterval(function(){secs--;if(secs<=0){clearInterval(nextHandTimer);nextHandTimer=null;nextAction();}else btn.textContent=nextLabel+" ("+secs+"s)";},1000);
+      btn.onclick=function(){clearInterval(nextHandTimer);nextHandTimer=null;nextAction();};
+    } else {
+      if(nextHandTimer){clearInterval(nextHandTimer);nextHandTimer=null;}
+      btn.textContent=phase==="idle"?"Deal Cards ▶":nextLabel+" ▶";
+      btn.onclick=nextAction;
+    }
+    ctrl.appendChild(btn);
+  } else {
+    var mkBtn=function(label,color,act,enabled){
+      var b=document.createElement("button");
+      b.style.cssText="background:"+color+";border:none;color:#fff;padding:8px 18px;border-radius:6px;font-weight:bold;opacity:"+(enabled?1:0.4)+";cursor:"+(enabled?"pointer":"not-allowed");
+      b.disabled=!enabled;b.textContent=label;b.onclick=function(){humanAction(act);};return b;
+    };
+    var canRaise=isMyTurn&&(human?human.chips:0)>0&&(human?human.chips:0)+(bets[0]||0)>=roundBet+BB;
+    ctrl.appendChild(mkBtn("Fold","#c53030","fold",isMyTurn));
+    ctrl.appendChild(mkBtn(toCall===0?"Check":"Call $"+toCall,"#2b6cb0",toCall===0?"check":"call",isMyTurn));
+    ctrl.appendChild(mkBtn("Raise +$"+BB,"#d69e2e","raise",canRaise));
+  }
+  var lb=document.getElementById("log-box");
+  if(log.length>0){
+    lb.style.display="block";
+    var le=document.getElementById("log-entries");le.innerHTML="";
+    log.forEach(function(l,i){var d=document.createElement("div");d.className="log-entry"+(i===0?" latest":"");d.textContent=l;le.appendChild(d);});
+  } else lb.style.display="none";
+}
+
+init();
+</script>
+</body>
+</html>
