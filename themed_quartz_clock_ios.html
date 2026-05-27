@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>主题石英钟</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Alatsi&family=Alata&family=Crimson+Text&family=Slabo+27px&family=Dosis:wght@400&family=DM+Sans:wght@400&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+  body {
+    min-height: 100vh;
+    min-height: -webkit-fill-available;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Alatsi', system-ui, sans-serif;
+    transition: background 0.4s;
+    padding: env(safe-area-inset-top, 1rem) env(safe-area-inset-right, 1rem) env(safe-area-inset-bottom, 1rem) env(safe-area-inset-left, 1rem);
+    gap: 0;
+  }
+  .clock-area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+    justify-content: center;
+    width: 100%;
+  }
+  canvas {
+    display: block;
+    border: none;
+    outline: none;
+    /* Scale canvas to fit screen width with some padding */
+    width: min(90vw, 90vh - 160px);
+    height: min(90vw, 90vh - 160px);
+    flex-shrink: 0;
+  }
+  .date-display {
+    margin-top: 1rem;
+    font-size: clamp(11px, 3vw, 15px);
+    line-height: 1.5;
+    height: 22px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    opacity: 0.7;
+    transition: color 0.4s;
+    white-space: nowrap;
+  }
+  .theme-picker {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 7px;
+    padding: 0.75rem 1rem 0.5rem;
+    width: 100%;
+    max-width: 500px;
+  }
+  .theme-btn {
+    padding: 6px 13px;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    font-size: clamp(11px, 3vw, 13px);
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    -webkit-touch-callout: none;
+    user-select: none;
+    touch-action: manipulation;
+    -webkit-user-select: none;
+  }
+  .theme-btn:active { opacity: 0.75; transform: scale(0.96); }
+  .theme-btn.active { border-color: rgba(255,255,255,0.75); }
+</style>
+</head>
+<body>
+<div class="clock-area">
+  <canvas id="clock" width="640" height="640"></canvas>
+  <div class="date-display" id="date-display"></div>
+</div>
+<div class="theme-picker" id="picker"></div>
+
+<script>
+const THEMES = {
+  'Golden Hour': {
+    font:      "'Alatsi'",
+    bg:        '#e8d9c4',
+    face:      '#fdf6ec',
+    rim:       '#c1666b',
+    rimInner:  '#f4a900',
+    tick:      '#4a403a',
+    tickMin:   '#c1666b',
+    numText:   '#4a403a',
+    hourHand:  '#4a403a',
+    minHand:   '#5d2e46',
+    secHand:   '#c1666b',
+    center:    '#f4a900',
+    centerDot: '#4a403a',
+    dateText:  '#4a403a',
+    btnBg:     '#c1666b',
+    btnText:   '#fdf6ec',
+  },
+  'Ocean Depths': {
+    font:      "'Alata'",
+    bg:        '#111c2a',
+    face:      '#1a2e42',
+    rim:       '#1a2332',
+    rimInner:  '#2d8b8b',
+    tick:      '#a8dadc',
+    tickMin:   '#2d8b8b',
+    numText:   '#f1faee',
+    hourHand:  '#f1faee',
+    minHand:   '#a8dadc',
+    secHand:   '#00ffff',
+    center:    '#2d8b8b',
+    centerDot: '#f1faee',
+    dateText:  '#a8dadc',
+    btnBg:     '#2d8b8b',
+    btnText:   '#f1faee',
+  },
+  'Sunset Boulevard': {
+    font:      "'Crimson Text'",
+    bg:        '#fde8d8',
+    face:      '#fff8f0',
+    rim:       '#e76f51',
+    rimInner:  '#e9c46a',
+    tick:      '#264653',
+    tickMin:   '#f4a261',
+    numText:   '#264653',
+    hourHand:  '#264653',
+    minHand:   '#4a7c59',
+    secHand:   '#e76f51',
+    center:    '#e9c46a',
+    centerDot: '#264653',
+    dateText:  '#264653',
+    btnBg:     '#e76f51',
+    btnText:   '#fff8f0',
+  },
+  'Forest Canopy': {
+    font:      "'Slabo 27px'",
+    bg:        '#dfe8d8',
+    face:      '#faf9f6',
+    rim:       '#2d4a2b',
+    rimInner:  '#a4ac86',
+    tick:      '#2d4a2b',
+    tickMin:   '#7d8471',
+    numText:   '#2d4a2b',
+    hourHand:  '#2d4a2b',
+    minHand:   '#4a6fa5',
+    secHand:   '#b7472a',
+    center:    '#a4ac86',
+    centerDot: '#2d4a2b',
+    dateText:  '#2d4a2b',
+    btnBg:     '#2d4a2b',
+    btnText:   '#faf9f6',
+  },
+  'Modern Minimalist': {
+    font:      "'Alata'",
+    bg:        '#f0f0f0',
+    face:      '#ffffff',
+    rim:       '#36454f',
+    rimInner:  '#d3d3d3',
+    tick:      '#36454f',
+    tickMin:   '#708090',
+    numText:   '#36454f',
+    hourHand:  '#36454f',
+    minHand:   '#4a6fa5',
+    secHand:   '#b7472a',
+    center:    '#d3d3d3',
+    centerDot: '#36454f',
+    dateText:  '#36454f',
+    btnBg:     '#36454f',
+    btnText:   '#ffffff',
+  },
+  'Arctic Frost': {
+    font:      "'Alata'",
+    bg:        '#e8f1fa',
+    face:      '#fafafa',
+    rim:       '#4a6fa5',
+    rimInner:  '#c0c0c0',
+    tick:      '#4a6fa5',
+    tickMin:   '#c0c0c0',
+    numText:   '#4a6fa5',
+    hourHand:  '#4a6fa5',
+    minHand:   '#36454f',
+    secHand:   '#b7472a',
+    center:    '#d4e4f7',
+    centerDot: '#4a6fa5',
+    dateText:  '#4a6fa5',
+    btnBg:     '#4a6fa5',
+    btnText:   '#fafafa',
+  },
+  'Desert Rose': {
+    font:      "'Alatsi'",
+    bg:        '#f0e0d2',
+    face:      '#fdf7f4',
+    rim:       '#b87d6d',
+    rimInner:  '#d4a5a5',
+    tick:      '#5d2e46',
+    tickMin:   '#b87d6d',
+    numText:   '#5d2e46',
+    hourHand:  '#5d2e46',
+    minHand:   '#4a403a',
+    secHand:   '#b87d6d',
+    center:    '#d4a5a5',
+    centerDot: '#5d2e46',
+    dateText:  '#5d2e46',
+    btnBg:     '#b87d6d',
+    btnText:   '#fdf7f4',
+  },
+  'Tech Innovation': {
+    font:      "'Dosis'",
+    bg:        '#0a0a0a',
+    face:      '#1e1e1e',
+    rim:       '#0066ff',
+    rimInner:  '#00ffff',
+    tick:      '#ffffff',
+    tickMin:   '#0066ff',
+    numText:   '#ffffff',
+    hourHand:  '#ffffff',
+    minHand:   '#a8dadc',
+    secHand:   '#00ffff',
+    center:    '#0066ff',
+    centerDot: '#ffffff',
+    dateText:  '#00ffff',
+    btnBg:     '#0066ff',
+    btnText:   '#ffffff',
+  },
+  'Botanical Garden': {
+    font:      "'Crimson Text'",
+    bg:        '#eaf2e8',
+    face:      '#f5f3ed',
+    rim:       '#4a7c59',
+    rimInner:  '#f9a620',
+    tick:      '#4a7c59',
+    tickMin:   '#b7472a',
+    numText:   '#4a7c59',
+    hourHand:  '#4a7c59',
+    minHand:   '#264653',
+    secHand:   '#b7472a',
+    center:    '#f9a620',
+    centerDot: '#4a7c59',
+    dateText:  '#4a7c59',
+    btnBg:     '#4a7c59',
+    btnText:   '#f5f3ed',
+  },
+  'Midnight Galaxy': {
+    font:      "'Dosis'",
+    bg:        '#1a1028',
+    face:      '#2b1e3e',
+    rim:       '#4a4e8f',
+    rimInner:  '#a490c2',
+    tick:      '#e6e6fa',
+    tickMin:   '#a490c2',
+    numText:   '#e6e6fa',
+    hourHand:  '#e6e6fa',
+    minHand:   '#a490c2',
+    secHand:   '#00ffff',
+    center:    '#4a4e8f',
+    centerDot: '#e6e6fa',
+    dateText:  '#a490c2',
+    btnBg:     '#4a4e8f',
+    btnText:   '#e6e6fa',
+  },
+};
+
+let currentTheme = 'Golden Hour';
+const canvas = document.getElementById('clock');
+const ctx = canvas.getContext('2d');
+const W = 640, R = 280, CX = 320, CY = 320;
+
+// High-DPI / Retina support
+const dpr = window.devicePixelRatio || 1;
+canvas.width = W * dpr;
+canvas.height = W * dpr;
+ctx.scale(dpr, dpr);
+
+const picker = document.getElementById('picker');
+Object.keys(THEMES).forEach(name => {
+  const t = THEMES[name];
+  const btn = document.createElement('button');
+  btn.className = 'theme-btn' + (name === currentTheme ? ' active' : '');
+  btn.textContent = name;
+  btn.style.background = t.btnBg;
+  btn.style.color = t.btnText;
+  btn.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    currentTheme = name;
+    document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    applyBg();
+  }, { passive: false });
+  btn.onclick = () => {
+    currentTheme = name;
+    document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    applyBg();
+  };
+  picker.appendChild(btn);
+});
+
+function applyBg() {
+  const C = THEMES[currentTheme];
+  document.body.style.background = C.bg;
+  const dateEl = document.getElementById('date-display');
+  dateEl.style.color = C.dateText;
+  dateEl.style.fontFamily = C.font + ', system-ui, sans-serif';
+}
+applyBg();
+
+function drawClock() {
+  const C = THEMES[currentTheme];
+  ctx.clearRect(0, 0, W, W);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(CX, CY, R + 28, 0, Math.PI * 2);
+  ctx.fillStyle = C.rim;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(CX, CY, R + 20, 0, Math.PI * 2);
+  ctx.strokeStyle = C.rimInner;
+  ctx.lineWidth = 6;
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.beginPath();
+  ctx.arc(CX, CY, R, 0, Math.PI * 2);
+  ctx.fillStyle = C.face;
+  ctx.fill();
+
+  const grad = ctx.createRadialGradient(CX, CY - 60, 20, CX, CY, R);
+  grad.addColorStop(0, 'rgba(255,255,255,0.06)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.06)');
+  ctx.beginPath();
+  ctx.arc(CX, CY, R, 0, Math.PI * 2);
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  for (let i = 0; i < 60; i++) {
+    const angle = (i / 60) * Math.PI * 2 - Math.PI / 2;
+    const isHour = i % 5 === 0;
+    const len = 14;
+    const width = isHour ? 5 : 2;
+    const r0 = R - 4;
+    const x1 = CX + Math.cos(angle) * r0;
+    const y1 = CY + Math.sin(angle) * r0;
+    const x2 = CX + Math.cos(angle) * (r0 - len);
+    const y2 = CY + Math.sin(angle) * (r0 - len);
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.strokeStyle = isHour ? C.tick : C.tickMin;
+    ctx.lineWidth = width;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+  }
+
+  const nums = [12,1,2,3,4,5,6,7,8,9,10,11];
+  ctx.font = `400 80px ${C.font}, system-ui, sans-serif`;
+  ctx.fillStyle = C.numText;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i < 12; i++) {
+    const angle = (i / 12) * Math.PI * 2 - Math.PI / 2;
+    const nr = R - 60;
+    const nx = CX + Math.cos(angle) * nr;
+    const ny = CY + Math.sin(angle) * nr;
+    ctx.fillText(nums[i], nx, ny);
+  }
+
+  const now = new Date();
+  const sec = now.getSeconds() + now.getMilliseconds() / 1000;
+  const min = now.getMinutes() + sec / 60;
+  const hour = (now.getHours() % 12) + min / 60;
+
+  drawHand(hour / 12 * Math.PI * 2, R * 0.52, 12, C.hourHand);
+  drawHand(min / 60 * Math.PI * 2, R * 0.78, 8, C.minHand);
+  drawSecHand(sec / 60 * Math.PI * 2, C.secHand);
+
+  ctx.beginPath();
+  ctx.arc(CX, CY, 20, 0, Math.PI * 2);
+  ctx.fillStyle = C.center;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(CX, CY, 10, 0, Math.PI * 2);
+  ctx.fillStyle = C.centerDot;
+  ctx.fill();
+
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const d = new Date();
+  document.getElementById('date-display').textContent =
+    days[d.getDay()] + ',  ' + months[d.getMonth()] + ' ' + d.getDate() + ',  ' + d.getFullYear();
+
+  requestAnimationFrame(drawClock);
+}
+
+function drawHand(angle, length, width, color) {
+  const a = angle - Math.PI / 2;
+  const tailLen = length * 0.18;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(CX - Math.cos(a) * tailLen, CY - Math.sin(a) * tailLen);
+  ctx.lineTo(CX + Math.cos(a) * length, CY + Math.sin(a) * length);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawSecHand(angle, color) {
+  const a = angle - Math.PI / 2;
+  const tailLen = R * 0.22;
+  const tipLen = R * 0.88;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(CX - Math.cos(a) * tailLen, CY - Math.sin(a) * tailLen);
+  ctx.lineTo(CX + Math.cos(a) * tipLen, CY + Math.sin(a) * tipLen);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 4;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+  ctx.restore();
+}
+
+document.fonts.ready.then(() => drawClock());
+</script>
+</body>
+</html>
