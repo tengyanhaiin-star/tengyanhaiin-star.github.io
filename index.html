@@ -180,7 +180,7 @@ function cardEl(card,hidden,small){
   } else {
     el.className="card";el.style.cssText="width:"+w+";height:"+h;
     var red=card.s==="♥"||card.s==="♦",col=red?"#e53e3e":"#1a202c";
-    el.innerHTML='<span style="font-size:'+(small?"22px":"30px")+';font-weight:normal;color:'+col+';line-height:0.9">'+card.r+'</span>'
+    el.innerHTML='<span style="font-family:JQKAs Wild,serif;font-size:'+(small?"22px":"30px")+';font-weight:normal;color:'+col+';line-height:0.9">'+card.r+'</span>'
       +'<span style="font-size:'+(small?"13px":"17px")+';color:'+col+'">'+card.s+'</span>';
   }
   return el;
