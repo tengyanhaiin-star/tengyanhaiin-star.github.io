@@ -1,2 +1,2 @@
 # tengyanhaiin-star.github.io
-John's Repository
+Clocks in Themes
